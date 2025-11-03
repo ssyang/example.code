@@ -1,0 +1,36 @@
+# .gitignore for Visual Studio C++ CMake projects
+
+#################
+## Visual Studio
+#################
+# User-specific files
+*.suo
+*.user
+*.sln.docstates
+
+# Visual Studio cache and temporary files
+.vs/
+
+#################
+## CMake
+#################
+# Build directories used by Visual Studio with CMake
+out/
+build/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+#################
+## Build Artifacts
+#################
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.ilk
