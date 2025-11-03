@@ -1,8 +1,18 @@
 #include <iostream>
+
+#ifdef _WIN32
 #include <conio.h>    // For _kbhit() and _getch()
 #include <Windows.h>  // For Windows API functions
 #include <shellapi.h> // For ShellExecuteEx()
+#else // For Linux/Debian
+#include <unistd.h>   // For geteuid(), read()
+#include <termios.h>  // For terminal manipulation
+#include <sys/select.h>// For select()
+#include <signal.h>   // For signal()
+#include <stdio.h>    // For getchar()
+#endif
 
+#ifdef _WIN32
 // 콘솔 제어 이벤트를 처리하는 핸들러 함수
 // 이 함수는 Ctrl+C, 창 닫기 등의 이벤트를 가로챕니다.
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
@@ -67,8 +77,49 @@ BOOL IsRunningAsAdmin() {
 
     return fIsAdmin;
 }
+#else // Linux implementations
+
+struct termios orig_termios;
+
+// 프로그램 종료 시 원래 터미널 설정으로 복원하는 함수
+void restore_terminal() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+}
+
+// 터미널을 non-canonical 모드로 설정하여 키를 바로 읽을 수 있게 함
+void enable_raw_mode() {
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    atexit(restore_terminal); // 프로그램 종료 시 복원 함수가 호출되도록 등록
+
+    struct termios raw = orig_termios;
+    raw.c_lflag &= ~(ECHO | ICANON); // 에코 및 정규 모드 비활성화
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+// Linux용 _kbhit() 구현
+int kbhit() {
+    struct timeval tv = { 0L, 0L };
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+}
+
+// 종료 시그널을 처리하는 핸들러 함수
+void signal_handler(int signum) {
+    // SIGINT (Ctrl+C), SIGHUP (터미널 종료) 등
+    std::cout << "\n[System] Exit is disabled. Press 'x' to quit." << std::endl;
+}
+
+// 현재 프로세스가 root 권한으로 실행 중인지 확인하는 함수
+bool is_running_as_root() {
+    return (geteuid() == 0);
+}
+
+#endif
 
 int main() {
+#ifdef _WIN32
     // 0. 관리자 권한이 없으면 권한 상승을 요청하고 재시작합니다.
     if (!IsRunningAsAdmin()) {
         wchar_t szPath[MAX_PATH];
@@ -92,8 +143,17 @@ int main() {
         }
         return 0; // 새로운 프로세스가 시작되었으므로 현재 프로세스는 종료
     }
+#else // Linux
+    // 0. root 권한이 없으면 안내 후 종료합니다.
+    if (!is_running_as_root()) {
+        std::cerr << "Administrator (root) privileges are required." << std::endl;
+        std::cerr << "Please run this program with 'sudo'." << std::endl;
+        return 1;
+    }
+#endif
 
     // 1. 콘솔 제어 핸들러를 등록하여 Ctrl+C 등의 이벤트를 가로챕니다.
+#ifdef _WIN32
     if (!SetConsoleCtrlHandler(CtrlHandler, TRUE)) {
         std::cerr << "Error: Could not set control handler." << std::endl;
         return 1;
@@ -101,16 +161,29 @@ int main() {
 
     // 2. 콘솔 창의 닫기 버튼을 비활성화합니다.
     DisableCloseButton();
+#else // Linux
+    signal(SIGINT, signal_handler);  // Ctrl+C
+    signal(SIGHUP, signal_handler);  // 터미널 닫기
+    signal(SIGTERM, signal_handler); // 일반적인 종료 요청
+
+    // 2. 터미널을 즉시 입력 모드로 변경합니다.
+    enable_raw_mode();
+#endif
 
     std::cout << "Program started. Press any key to display it." << std::endl;
     std::cout << "Press 'x' to exit." << std::endl;
 
     char key_input;
     while (true) {
+#ifdef _WIN32
         // _kbhit() : 키보드 입력이 있는지 확인 (non-blocking)
         if (_kbhit()) {
             // _getch() : 버퍼 없이 바로 키 입력 값을 가져옴
             key_input = _getch();
+#else // Linux
+        if (kbhit()) {
+            key_input = getchar();
+#endif
             std::cout << "You pressed: " << key_input << std::endl;
 
             // 'x' 또는 'X'가 입력되면 루프를 탈출하여 프로그램을 종료합니다.
